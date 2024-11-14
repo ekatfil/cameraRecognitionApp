@@ -1,18 +1,60 @@
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import { useState } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState, useRef, useEffect } from 'react';
+import { Button, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
 
 export default function App() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
+  const [processedFrame, setProcessedFrame] = useState<string | null>(null);
+  const cameraRef = useRef<CameraView>(null);
+
+  const captureAndSendFrame = async () => {
+    if (cameraRef.current) {
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.5,
+          base64: true,
+        });
+        
+        if (!photo?.base64) return;
+
+        const response = await fetch('http://localhost:8000/process-frame', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            frame: photo.base64,
+          }),
+        });
+
+        const processedData = await response.json();
+        setProcessedFrame(processedData.processedFrame);
+      } catch (error) {
+        console.error('Error processing frame:', error);
+      }
+    }
+  };
+
+  useEffect(() => {
+    let frameInterval: NodeJS.Timeout;
+    
+    if (permission?.granted) {
+      frameInterval = setInterval(captureAndSendFrame, 1000);
+    }
+
+    return () => {
+      if (frameInterval) {
+        clearInterval(frameInterval);
+      }
+    };
+  }, [permission?.granted]);
 
   if (!permission) {
-    // Camera permissions are still loading.
     return <View />;
   }
 
   if (!permission.granted) {
-    // Camera permissions are not granted yet.
     return (
       <View style={styles.container}>
         <Text style={styles.message}>We need your permission to show the camera</Text>
@@ -27,7 +69,17 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} facing={facing}>
+      <CameraView 
+        ref={cameraRef}
+        style={styles.camera} 
+        facing={facing}
+      >
+        {processedFrame && (
+          <Image 
+            source={{ uri: `data:image/jpeg;base64,${processedFrame}` }}
+            style={styles.processedFrame}
+          />
+        )}
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
             <Text style={styles.text}>Flip Camera</Text>
@@ -65,5 +117,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
+  },
+  processedFrame: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });
